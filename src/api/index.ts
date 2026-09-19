@@ -261,10 +261,10 @@ export async function fetchSession(): Promise<SessionResponse> {
 }
 
 export async function fetchProjects(params?: { q?: string }): Promise<Project[]> {
-  const url = new URL(`${BASE_URL}/projects`)
-  if (params?.q) url.searchParams.set('q', params.q)
-  url.searchParams.set('page_size', '50')
-  const res = await fetch(url.toString())
+  const query = new URLSearchParams()
+  if (params?.q) query.set('q', params.q)
+  query.set('page_size', '50')
+  const res = await fetch(`${BASE_URL}/projects?${query.toString()}`)
   if (!res.ok) throw new Error(`Failed to fetch projects: ${res.statusText}`)
   const data = await res.json()
   return (data.items || []).map((p: Record<string, unknown>) => mapProject(p))

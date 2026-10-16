@@ -1,77 +1,89 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-  type ReactNode,
-} from 'react'
-import { fetchSession } from '@/api'
-import { onUnauthenticated, ssoLoginUrl } from '@/lib/sso'
-import type { SessionResponse } from '@/types'
-
-export { ssoLoginUrl }
-
-const anonymousSession: SessionResponse = {
-  authenticated: false,
-  is_owner: false,
-  is_admin: false,
-  email: null,
-  user_id: null,
-  role_name: null,
-  name: null,
-}
-
-interface AuthState {
-  session: SessionResponse
-  isLoading: boolean
-  isAdmin: boolean
-  refetch: () => Promise<void>
-}
-
-const AuthContext = createContext<AuthState | null>(null)
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { AuthContext, type AuthState, type AuthStatus } from '@/context/useAuth'
+import { isAppAdmin, onUnauthenticated, sso, SSO_APP_ID, type SsoSession, type SsoUser } from '@/lib/sso'
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [session, setSession] = useState<SessionResponse>(anonymousSession)
-  const [isLoading, setIsLoading] = useState(true)
+  const [user, setUser] = useState<SsoUser | null>(null)
+  const [status, setStatus] = useState<AuthStatus>('loading')
+  const [signedOut, setSignedOut] = useState(false)
 
-  const refetch = useCallback(async () => {
-    try {
-      const next = await fetchSession()
-      setSession(next)
-    } catch {
-      setSession(anonymousSession)
-    } finally {
-      setIsLoading(false)
+  const apply = useCallback((session: SsoSession) => {
+    if (session.authenticated && session.user) {
+      setUser(session.user)
+      setStatus('authenticated')
+      setSignedOut(false)
+    } else {
+      setUser(null)
+      setStatus('anonymous')
     }
   }, [])
 
-  useEffect(() => {
-    void refetch()
-  }, [refetch])
+  const markUnavailable = useCallback(() => {
+    setUser(null)
+    setStatus('unavailable')
+  }, [])
+
+  // SSO is the source of truth; GET /api/auth/session refreshes server-side.
+  const refetch = useCallback(async () => {
+    try {
+      apply(await sso.getSession())
+    } catch {
+      markUnavailable()
+    }
+  }, [apply, markUnavailable])
+
+  const logout = useCallback(async () => {
+    setSignedOut(true)
+    try {
+      await sso.logout()
+    } catch {
+      // The SDK clears local state and notifies other tabs even on failure.
+    }
+    setUser(null)
+    setStatus('anonymous')
+  }, [])
 
   useEffect(() => {
-    return onUnauthenticated(() => {
-      setSession(anonymousSession)
-    })
-  }, [])
+    let active = true
+    sso.getSession().then(
+      (session) => {
+        if (active) apply(session)
+      },
+      () => {
+        if (active) markUnavailable()
+      },
+    )
+    return () => {
+      active = false
+    }
+  }, [apply, markUnavailable])
+
+  // Login/logout in another tab (or a session change noticed here).
+  useEffect(() => sso.onSessionChange(apply), [apply])
+
+  // An app API call stayed 401 after a refresh.
+  useEffect(
+    () =>
+      onUnauthenticated(() => {
+        setUser(null)
+        setStatus('anonymous')
+      }),
+    [],
+  )
 
   const value = useMemo<AuthState>(
     () => ({
-      session,
-      isLoading,
-      isAdmin: Boolean(session.authenticated && session.is_admin),
+      user,
+      status,
+      isLoading: status === 'loading',
+      isAuthenticated: status === 'authenticated',
+      isAdmin: status === 'authenticated' && isAppAdmin(user, SSO_APP_ID),
+      signedOut,
       refetch,
+      logout,
     }),
-    [session, isLoading, refetch],
+    [user, status, signedOut, refetch, logout],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
-}
-
-export function useAuth(): AuthState {
-  const ctx = useContext(AuthContext)
-  if (!ctx) throw new Error('useAuth must be used within AuthProvider')
-  return ctx
 }

@@ -58,16 +58,6 @@ export interface SkillsResponse {
   allSkills: Skill[]
 }
 
-export interface SessionResponse {
-  authenticated: boolean
-  is_owner: boolean
-  is_admin: boolean
-  email: string | null
-  user_id: string | null
-  role_name: string | null
-  name: string | null
-}
-
 export interface Paginated<T> {
   items: T[]
   total: number

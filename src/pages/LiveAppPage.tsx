@@ -3,7 +3,8 @@ import { useParams } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { fetchAppBootstrap } from '@/api'
 import { AdvanceScraperPage } from '@/pages/AdvanceScraperPage'
-import { useAuth, ssoLoginUrl } from '@/context/AuthContext'
+import { useAuth } from '@/context/useAuth'
+import { sso } from '@/lib/sso'
 import type { AppBootstrap } from '@/types'
 
 const APP_COMPONENTS: Record<
@@ -15,7 +16,7 @@ const APP_COMPONENTS: Record<
 
 export function LiveAppPage() {
   const { projectSlug = '' } = useParams()
-  const { session, isLoading: authLoading } = useAuth()
+  const { isAuthenticated, isLoading: authLoading } = useAuth()
   const [bootstrap, setBootstrap] = useState<AppBootstrap | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
@@ -30,7 +31,7 @@ export function LiveAppPage() {
         setError(err instanceof Error ? err.message : 'App not found')
       })
       .finally(() => setLoading(false))
-  }, [projectSlug, authLoading, session.authenticated])
+  }, [projectSlug, authLoading, isAuthenticated])
 
   if (authLoading || loading) {
     return (
@@ -51,14 +52,14 @@ export function LiveAppPage() {
     )
   }
 
-  if (!session.authenticated) {
+  if (!isAuthenticated) {
     return (
       <section className="mx-auto max-w-xl px-6 py-24 text-center">
         <p className="font-mono text-xs tracking-wider text-[#64ffda]">// ACCESS</p>
         <h1 className="mt-3 text-3xl font-semibold text-[#ccd6f6]">{bootstrap.projectName}</h1>
         <p className="mt-3 text-[#8892b0]">Sign in with SSO to use this live app.</p>
         <a
-          href={ssoLoginUrl(`/apps/${bootstrap.projectSlug}`)}
+          href={sso.loginUrl()}
           className="mt-8 inline-flex items-center justify-center rounded-md border border-[#64ffda] bg-[rgba(100,255,218,0.1)] px-5 py-2.5 font-mono text-sm text-[#64ffda]"
         >
           Continue with SSO

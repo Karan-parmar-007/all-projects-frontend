@@ -1,6 +1,7 @@
 import { NavLink, Outlet } from 'react-router-dom'
 import { FolderKanban, Sparkles, Tags } from 'lucide-react'
-import { useAuth } from '@/context/AuthContext'
+import { SignOutButton } from '@/components/SignOutButton'
+import { useAuth } from '@/context/useAuth'
 
 const NAV = [
   { to: '/admin', label: 'Projects', icon: FolderKanban, end: true },
@@ -9,8 +10,8 @@ const NAV = [
 ]
 
 export function AdminLayout() {
-  const { session } = useAuth()
-  const letter = (session.name || session.email || 'A').trim().charAt(0).toUpperCase()
+  const { user } = useAuth()
+  const letter = (user?.name || user?.email || 'A').trim().charAt(0).toUpperCase()
 
   return (
     <div className="min-h-screen bg-[#0a192f] text-[#8892b0]">
@@ -42,11 +43,12 @@ export function AdminLayout() {
           </div>
           <div className="flex items-center gap-3">
             <span className="hidden text-xs text-[#8892b0] sm:inline">
-              {session.name || session.email}
+              {user?.name || user?.email}
             </span>
             <span className="flex h-8 w-8 items-center justify-center rounded-full border border-[#64ffda] font-mono text-sm text-[#64ffda]">
               {letter}
             </span>
+            <SignOutButton className="rounded px-3 py-2 font-mono text-xs text-[#ccd6f6] hover:text-[#64ffda]" />
           </div>
         </div>
       </header>

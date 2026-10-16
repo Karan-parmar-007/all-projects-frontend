@@ -1,12 +1,13 @@
 import React, { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { ExternalLink, Menu, X, Layers, Code, Shield } from 'lucide-react'
-import { useAuth } from '@/context/AuthContext'
+import { SignOutButton } from '@/components/SignOutButton'
+import { useAuth } from '@/context/useAuth'
 
 export const Navbar: React.FC = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const location = useLocation()
-  const { isAdmin } = useAuth()
+  const { isAdmin, isAuthenticated } = useAuth()
   const portfolioUrl = import.meta.env.VITE_PORTFOLIO_URL || 'http://localhost:5174'
   const ssoUrl = import.meta.env.VITE_SSO_URL || 'http://localhost:5173'
 
@@ -66,6 +67,10 @@ export const Navbar: React.FC = () => {
             </Link>
           ) : null}
 
+          {isAuthenticated ? (
+            <SignOutButton className="text-[#8892b0] hover:text-[#64ffda]" />
+          ) : null}
+
           <a
             href={portfolioUrl}
             target="_blank"
@@ -121,6 +126,12 @@ export const Navbar: React.FC = () => {
             >
               Admin
             </Link>
+          ) : null}
+          {isAuthenticated ? (
+            <SignOutButton
+              onDone={() => setMobileMenuOpen(false)}
+              className="py-2 text-[#8892b0] hover:text-[#64ffda]"
+            />
           ) : null}
           <a
             href={portfolioUrl}

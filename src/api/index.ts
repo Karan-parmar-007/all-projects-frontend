@@ -4,25 +4,15 @@ import type {
   Paginated,
   Project,
   ProjectStatus,
-  SessionResponse,
   Skill,
   SkillCategoryGroup,
   SkillsResponse,
   SsoRole,
   Tag,
 } from '@/types'
-import { getCsrfToken } from '@/lib/csrf'
-import { notifyUnauthenticated, ssoLoginUrl } from '@/lib/sso'
+import { isProtectedPath, notifyUnauthenticated, refreshSession, sso } from '@/lib/sso'
 
-export const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8002/api/allprojects'
-
-function authBase(): string {
-  try {
-    return `${new URL(BASE_URL).origin}/api/auth`
-  } catch {
-    return '/api/auth'
-  }
-}
+export const BASE_URL = import.meta.env.VITE_API_URL || '/api/allprojects'
 
 export function resolveMediaUrl(url?: string | null, key?: string | null): string | null {
   if (key) {
@@ -46,18 +36,6 @@ export function resolveMediaUrl(url?: string | null, key?: string | null): strin
   }
   return url
 }
-
-const anonymousSession: SessionResponse = {
-  authenticated: false,
-  is_owner: false,
-  is_admin: false,
-  email: null,
-  user_id: null,
-  role_name: null,
-  name: null,
-}
-
-let refreshPromise: Promise<boolean> | null = null
 
 function pick<T>(obj: Record<string, unknown>, ...keys: string[]): T | undefined {
   for (const key of keys) {
@@ -161,19 +139,11 @@ async function parseError(res: Response): Promise<string> {
   }
 }
 
-function isAuthLifecycle(path: string): boolean {
-  return (
-    path.startsWith('/auth/session') ||
-    path.startsWith('/auth/refresh') ||
-    path.startsWith('/auth/logout')
-  )
-}
-
 async function rawFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers)
   const method = (init.method || 'GET').toUpperCase()
   if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
-    const csrf = getCsrfToken()
+    const csrf = sso.csrfToken()
     if (csrf) headers.set('X-CSRF-Token', csrf)
   }
   if (init.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) {
@@ -186,78 +156,24 @@ async function rawFetch(path: string, init: RequestInit = {}): Promise<Response>
   })
 }
 
-export async function refreshAuth(): Promise<boolean> {
-  const headers = new Headers()
-  const csrf = getCsrfToken()
-  if (csrf) headers.set('X-CSRF-Token', csrf)
-  const res = await fetch(`${authBase()}/refresh`, {
-    method: 'POST',
-    credentials: 'include',
-    headers,
-    body: '{}',
-  })
-  return res.ok
-}
-
-function refreshOnce(): Promise<boolean> {
-  if (!refreshPromise) {
-    refreshPromise = refreshAuth().finally(() => {
-      refreshPromise = null
-    })
-  }
-  return refreshPromise
-}
-
-function redirectToSsoAfterAuthFailure(): void {
-  const path = window.location.pathname
-  if (path.startsWith('/admin') || path.startsWith('/apps/')) {
-    window.location.replace(ssoLoginUrl(path))
-  }
-}
-
+/**
+ * App API call with the SSO contract's 401 handling: refresh the session
+ * (single-flight in the SSO client) and retry once; still 401 → signed out
+ * (protected pages go to SSO login and come back to the same URL).
+ */
 export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
   let res = await rawFetch(path, init)
-  if (res.status !== 401 || isAuthLifecycle(path)) {
-    return res
-  }
+  if (res.status !== 401) return res
 
-  const refreshed = await refreshOnce()
-  if (refreshed) {
+  if (await refreshSession()) {
     res = await rawFetch(path, init)
   }
 
   if (res.status === 401) {
     notifyUnauthenticated()
-    redirectToSsoAfterAuthFailure()
+    if (isProtectedPath()) sso.redirectToLogin()
   }
   return res
-}
-
-function mapSession(raw: Record<string, unknown>): SessionResponse {
-  return {
-    authenticated: Boolean(raw.authenticated),
-    is_owner: Boolean(raw.is_owner ?? raw.isOwner),
-    is_admin: Boolean(raw.is_admin ?? raw.isAdmin),
-    email: (raw.email as string | null) ?? null,
-    user_id: ((raw.user_id ?? raw.userId) as string | null) ?? null,
-    role_name: ((raw.role_name ?? raw.roleName) as string | null) ?? null,
-    name: (raw.name as string | null) ?? null,
-  }
-}
-
-export async function fetchSession(): Promise<SessionResponse> {
-  const read = async (): Promise<SessionResponse> => {
-    const res = await rawFetch('/auth/session')
-    if (!res.ok) return anonymousSession
-    return mapSession(await res.json())
-  }
-
-  let session = await read()
-  if (!session.authenticated) {
-    const refreshed = await refreshOnce()
-    if (refreshed) session = await read()
-  }
-  return session
 }
 
 export async function fetchProjects(params?: { q?: string }): Promise<Project[]> {

@@ -1,5 +1,5 @@
 import { apiFetch, BASE_URL } from '@/api'
-import { getCsrfToken } from '@/lib/csrf'
+import { isProtectedPath, notifyUnauthenticated, refreshSession, sso } from '@/lib/sso'
 import type {
   ScraperQuota,
   StartScrapePayload,
@@ -62,23 +62,46 @@ export async function fetchScraperCities(
   return raw.items || []
 }
 
-export async function streamScrape(
+function openScrapeStream(
   projectSlug: string,
   payload: StartScrapePayload,
-  handlers: StreamHandlers,
   signal?: AbortSignal,
-): Promise<void> {
+): Promise<Response> {
   const headers = new Headers({ 'Content-Type': 'application/json' })
-  const csrf = getCsrfToken()
+  const csrf = sso.csrfToken()
   if (csrf) headers.set('X-CSRF-Token', csrf)
-
-  const res = await fetch(`${BASE_URL}${appBase(projectSlug)}/runs/stream`, {
+  return fetch(`${BASE_URL}${appBase(projectSlug)}/runs/stream`, {
     method: 'POST',
     credentials: 'include',
     headers,
     body: JSON.stringify(payload),
     signal,
   })
+}
+
+/**
+ * Run a scrape and consume its NDJSON progress stream.
+ *
+ * The backend authorises the run once, when the stream opens; an open stream
+ * keeps going after the 15-minute access token expires. So auth is handled
+ * at connect time only: 401 → refresh the SSO session and reconnect once.
+ * A dropped stream is never auto-reconnected — that would start a second run
+ * and spend quota again.
+ */
+export async function streamScrape(
+  projectSlug: string,
+  payload: StartScrapePayload,
+  handlers: StreamHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
+  let res = await openScrapeStream(projectSlug, payload, signal)
+  if (res.status === 401 && (await refreshSession())) {
+    res = await openScrapeStream(projectSlug, payload, signal)
+  }
+  if (res.status === 401) {
+    notifyUnauthenticated()
+    if (isProtectedPath()) sso.redirectToLogin()
+  }
   if (!res.ok) throw new Error(await readError(res))
   if (!res.body) throw new Error('No stream body')
 
